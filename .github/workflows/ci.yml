@@ -1,0 +1,26 @@
+name: build-and-boot
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Same distribution as the 42 cluster.
+    container: fedora:44
+    steps:
+      - name: Install toolchain
+        run: |
+          dnf install -y make gcc binutils nasm \
+            grub2-tools grub2-tools-extra grub2-pc-modules xorriso xz gawk \
+            qemu-system-x86-core
+      - uses: actions/checkout@v4
+      - name: Toolchain info
+        run: make info
+      - name: Build
+        run: make re && make iso
+      - name: Boot test
+        run: WAIT=6 make test
+      - name: Check image size (< 10 MB)
+        run: test $(stat -c %s kfs.iso) -lt 10485760
