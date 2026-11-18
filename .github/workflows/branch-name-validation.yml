@@ -1,0 +1,30 @@
+name: Branch Naming Validation
+
+on:
+  push:
+    branches:
+      - "**"        # every branch (tags are not included)
+      - "!main"     # main itself is not validated
+  pull_request:     # every PR, whatever its base branch
+
+jobs:
+  validate-branch-name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate branch name
+        env:
+          # PR: source branch (GITHUB_HEAD_REF) / push: pushed branch (GITHUB_REF_NAME).
+          # Passed through env, never interpolated with ${{ }} inside the script,
+          # so a crafted branch name cannot inject shell commands.
+          HEAD_REF: ${{ github.head_ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          BRANCH_NAME="${HEAD_REF:-$REF_NAME}"
+          echo "Current branch: $BRANCH_NAME"
+
+          PATTERN='^(feature|hotfix|bugfix|refac|wip|build|style|chore)/.+'
+          if [[ ! "$BRANCH_NAME" =~ $PATTERN ]]; then
+            echo "::error::Branch name '$BRANCH_NAME' does not match $PATTERN (example: feature/vga-scroll)"
+            exit 1
+          fi
+          echo "Branch name is valid."
