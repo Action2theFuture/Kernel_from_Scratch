@@ -124,7 +124,7 @@ void vga_clear(void)
 
     for (size_t i = 0; i < VGA_WIDTH * VGA_TEXT_HEIGHT; i++)
         screen->buffer[i] = make_entry(' ', screen->color);
-    screen->row = VGA_TEXT_HEIGHT;
+    screen->row = 0;
     screen->column = 0;
     refresh_screen();
     update_cursor();
