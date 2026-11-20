@@ -8,7 +8,7 @@
 #define VGA_CRTC_INDEX      0x3D4
 #define VGA_CRTC_DATA       0x3D5
 #define TAB_SIZE            4
-#define VGA_FIRST_SCREEN    1
+#define VGA_TEXT_HEIGHT     (VGA_HEIGHT - 1)
 
 struct vga_screen
 {
@@ -36,20 +36,21 @@ static void draw_paging(void)
 {
     uint8_t paging_color = make_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE);
     uint8_t active_color = make_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_CYAN);
+    size_t  row_offset = VGA_TEXT_HEIGHT * VGA_WIDTH;
 
     for (size_t x = 0; x < VGA_WIDTH; x++)
-        g_buffer_mem[x] = make_entry(' ', paging_color);
+        g_buffer_mem[row_offset + x] = make_entry(' ', paging_color);
 
-    const char *title = " KFS-1";
+    const char *title = " Pages";
     for (size_t i = 0; title[i]; i++)
-        g_buffer_mem[i] = make_entry(title[i], paging_color);
+        g_buffer_mem[row_offset + i] = make_entry(title[i], paging_color);
 
     /* Print [1] [2] [3] [4] */
     size_t start_x = VGA_WIDTH - (VGA_NUM_SCREENS * 4) - 1;
     for (size_t screen = 0; screen < VGA_NUM_SCREENS; screen++)
     {
         uint8_t col = (screen == g_active_screen) ? active_color : paging_color;
-        size_t pos = start_x + screen * 4;
+        size_t pos = row_offset + start_x + screen * 4;
 
         g_buffer_mem[pos] = make_entry(screen == g_active_screen ? '[' : ' ', col);
         g_buffer_mem[pos + 1] = make_entry((char)('1' + screen), col);
@@ -62,7 +63,7 @@ static void refresh_screen(void)
     struct vga_screen   *screen = &g_screens[g_active_screen];
 
     draw_paging();
-    for (size_t i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
+    for (size_t i = 0; i < VGA_WIDTH * VGA_TEXT_HEIGHT; i++)
         g_buffer_mem[i] = screen->buffer[i];
 }
 
@@ -90,11 +91,11 @@ static void scroll(void)
     struct vga_screen   *screen = &g_screens[g_active_screen];
 
     /* Move rows 1..24 up by one, then blank the last row. */
-    for (size_t i = VGA_FIRST_SCREEN * VGA_WIDTH; i < (VGA_HEIGHT - 1) * VGA_WIDTH; i++)
+    for (size_t i = 0; i < (VGA_TEXT_HEIGHT - 1) * VGA_WIDTH; i++)
         screen->buffer[i] = screen->buffer[i + VGA_WIDTH];
     for (size_t x = 0; x < VGA_WIDTH; x++)
-        screen->buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = make_entry(' ', screen->color);
-    screen->row = VGA_HEIGHT - 1;
+        screen->buffer[(VGA_TEXT_HEIGHT - 1) * VGA_WIDTH + x] = make_entry(' ', screen->color);
+    screen->row = VGA_TEXT_HEIGHT - 1;
     refresh_screen();
 }
 
@@ -103,7 +104,7 @@ static void newline(void)
     struct vga_screen   *screen = &g_screens[g_active_screen];
 
     screen->column = 0;
-    if (++screen->row == VGA_HEIGHT)
+    if (++screen->row == VGA_TEXT_HEIGHT)
         scroll();
 }
 
@@ -111,9 +112,9 @@ void vga_clear(void)
 {
     struct vga_screen   *screen = &g_screens[g_active_screen];
 
-    for (size_t i = VGA_FIRST_SCREEN * VGA_WIDTH; i < VGA_WIDTH * VGA_HEIGHT; i++)
+    for (size_t i = 0; i < VGA_WIDTH * VGA_TEXT_HEIGHT; i++)
         screen->buffer[i] = make_entry(' ', screen->color);
-    screen->row = 0;
+    screen->row = VGA_TEXT_HEIGHT;
     screen->column = 0;
     refresh_screen();
     update_cursor();
@@ -125,7 +126,7 @@ void vga_init(void)
 
     for (size_t screen = 0; screen < VGA_NUM_SCREENS; screen++)
     {
-        g_screens[screen].row = VGA_FIRST_SCREEN;
+        g_screens[screen].row = 0;
         g_screens[screen].column = 0;
         g_screens[screen].color = default_color;
         for (size_t i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
@@ -135,7 +136,6 @@ void vga_init(void)
     enable_cursor(14, 15);
     refresh_screen();
     update_cursor();
-    vga_clear();
 }
 
 void vga_set_color(enum vga_color fg, enum vga_color bg)
