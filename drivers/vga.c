@@ -74,6 +74,8 @@ static void refresh_screen(void)
         g_buffer_mem[i] = screen->buffer[i];
 }
 
+// The blinking cursor on the screen is not a character (like _). It's a hardware element drawn directly by
+// the graphics card chip (known as CRTC - Cathode Ray Tube Controller)
 static void update_cursor(void)
 {
     struct vga_screen   *screen = &g_screens[g_active_screen];
@@ -106,6 +108,7 @@ static void scroll(void)
     refresh_screen();
 }
 
+// Sets column to 0 and increments row. If row reaches 24 (VGA_TEXT_HEIGHT), instead of go through the pagination bar, it calls scroll()
 static void newline(void)
 {
     struct vga_screen   *screen = &g_screens[g_active_screen];
@@ -127,6 +130,7 @@ void vga_clear(void)
     update_cursor();
 }
 
+// Initializes the 4 screens structures to zero, enables the hardware cursor, and displays the first screen
 void vga_init(void)
 {
     uint8_t default_color = make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
@@ -150,6 +154,9 @@ void vga_set_color(enum vga_color fg, enum vga_color bg)
     g_screens[g_active_screen].color = make_color(fg, bg);
 }
 
+// Handle some whitespaces and for a standard character: write the 16-bit cell
+// to both screen->buffer[i] and g_buffer_mem[i], then increment screen->column
+// If the 80th column is reached, call newline()
 static void put_raw(char c)
 {
     struct      vga_screen   *screen = &g_screens[g_active_screen];
@@ -206,6 +213,8 @@ void vga_putstr(const char *s)
     vga_write(s, strlen(s));
 }
 
+// Call refresh_screen (which displays the new buffer updates the active tab at the bottom)
+// and update_cursor() (which repositions the cursor where it was last left on that screen)
 void vga_switch_screen(size_t i)
 {
     if (i >= VGA_NUM_SCREENS || i == g_active_screen)
