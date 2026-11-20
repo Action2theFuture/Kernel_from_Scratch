@@ -3,9 +3,10 @@
 
 #include "types.h"
 
-#define VGA_WIDTH   80
-#define VGA_HEIGHT  25
-#define VGA_MEMORY  0xB8000
+#define VGA_WIDTH       80
+#define VGA_HEIGHT      25
+#define VGA_MEMORY      0xB8000
+#define VGA_NUM_SCREENS 4
 
 enum vga_color
 {
@@ -33,5 +34,6 @@ void    vga_set_color(enum vga_color fg, enum vga_color bg);
 void    vga_putchar(char c);
 void    vga_write(const char *data, size_t len);
 void    vga_putstr(const char *s);
+void    vga_switch_screen(size_t i);
 
 #endif

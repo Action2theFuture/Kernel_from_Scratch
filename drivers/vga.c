@@ -5,28 +5,81 @@
 /* VGA text mode: each cell is 16 bits -> low byte = ASCII, high byte = color
    (low nibble = foreground, high nibble = background). */
 
-#define VGA_CRTC_INDEX  0x3D4
-#define VGA_CRTC_DATA   0x3D5
-#define TAB_SIZE        4
+#define VGA_CRTC_INDEX      0x3D4
+#define VGA_CRTC_DATA       0x3D5
+#define TAB_SIZE            4
+#define VGA_TEXT_HEIGHT     (VGA_HEIGHT - 1) // lines 0 to 23
 
-static volatile uint16_t *const g_buffer = (volatile uint16_t *)VGA_MEMORY;
-static size_t  g_row;
-static size_t  g_col;
-static uint8_t g_color;
+struct vga_screen // Multiscreen : register the informations of the terminal -> his buffer, his color and the position of his cursor
+{
+    uint16_t    buffer[VGA_WIDTH * VGA_HEIGHT];
+    size_t      row;
+    size_t      column;
+    uint8_t     color;
+};
 
+// g_buffer_mem is the pointer to the actual video memory (0xB8000)
+// volatile prevents the GCC compiler from removing writes to this address because doesn't know that writing to this adress displays pixels
+static volatile uint16_t *const g_buffer_mem = (volatile uint16_t *)VGA_MEMORY; 
+static struct vga_screen        g_screens[VGA_NUM_SCREENS];
+static size_t                   g_active_screen;
+
+// Combine two 4-bit colors (0 to 15) into a single byte: 4 bits on the right -> text (fg) - 4 bits on the left -> background (bg << 4)
 static inline uint8_t make_color(enum vga_color fg, enum vga_color bg)
 {
     return (uint8_t)(fg | (bg << 4));
 }
 
+// Combine the ASCII character (bits 0-7) and the color byte (bits 8-15) into a 16-bit integer (uint16_t)
 static inline uint16_t make_entry(char c, uint8_t color)
 {
     return (uint16_t)(uint8_t)c | ((uint16_t)color << 8);
 }
 
+// line 24, this is the pagination. Written directly into g_buffer_mem and is never part of the area that scrolls
+static void draw_paging(void)
+{
+    uint8_t paging_color = make_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE); // Color of the pagination's line
+    uint8_t active_color = make_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_CYAN); // Color of the actual page
+    size_t  row_offset = VGA_TEXT_HEIGHT * VGA_WIDTH; // Index of the beginning of the last line (pagination's line)
+
+    // Fill the 80 spaces of this line with the paging_color, then writes " Pages" at the far left
+    for (size_t x = 0; x < VGA_WIDTH; x++)
+        g_buffer_mem[row_offset + x] = make_entry(' ', paging_color);
+
+    const char *title = " Pages";
+    for (size_t i = 0; title[i]; i++)
+        g_buffer_mem[row_offset + i] = make_entry(title[i], paging_color);
+
+    /* Print [1] [2] [3] [4] */
+    size_t start_x = VGA_WIDTH - (VGA_NUM_SCREENS * 4) - 1; // Calculate start_x to align the 4 tabs to the right
+    for (size_t screen = 0; screen < VGA_NUM_SCREENS; screen++) // Iterate through the 4 screens. If screen == g_active_screen -> use active_color and points the number 
+    {
+        uint8_t col = (screen == g_active_screen) ? active_color : paging_color;
+        size_t pos = row_offset + start_x + screen * 4;
+
+        g_buffer_mem[pos] = make_entry(screen == g_active_screen ? '[' : ' ', col);
+        g_buffer_mem[pos + 1] = make_entry((char)('1' + screen), col);
+        g_buffer_mem[pos + 2] = make_entry(screen == g_active_screen ? ']' : ' ', col);
+    }
+}
+
+// Call draw_paging() to draw line 24, then copy the first 24 lines. Consequently, line 24 is never overwritten
+static void refresh_screen(void)
+{
+    struct vga_screen   *screen = &g_screens[g_active_screen];
+
+    draw_paging();
+    for (size_t i = 0; i < VGA_WIDTH * VGA_TEXT_HEIGHT; i++)
+        g_buffer_mem[i] = screen->buffer[i];
+}
+
+// The blinking cursor on the screen is not a character (like _). It's a hardware element drawn directly by
+// the graphics card chip (known as CRTC - Cathode Ray Tube Controller)
 static void update_cursor(void)
 {
-    uint16_t pos = (uint16_t)(g_row * VGA_WIDTH + g_col);
+    struct vga_screen   *screen = &g_screens[g_active_screen];
+    uint16_t pos = (uint16_t)(screen->row * VGA_WIDTH + screen->column);
 
     outb(VGA_CRTC_INDEX, 0x0F);                 /* cursor location low */
     outb(VGA_CRTC_DATA, (uint8_t)(pos & 0xFF));
@@ -44,64 +97,100 @@ static void enable_cursor(uint8_t start_line, uint8_t end_line)
 
 static void scroll(void)
 {
+    struct vga_screen   *screen = &g_screens[g_active_screen];
+
     /* Move rows 1..24 up by one, then blank the last row. */
-    for (size_t i = 0; i < (VGA_HEIGHT - 1) * VGA_WIDTH; i++)
-        g_buffer[i] = g_buffer[i + VGA_WIDTH];
+    for (size_t i = 0; i < (VGA_TEXT_HEIGHT - 1) * VGA_WIDTH; i++)
+        screen->buffer[i] = screen->buffer[i + VGA_WIDTH];
     for (size_t x = 0; x < VGA_WIDTH; x++)
-        g_buffer[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = make_entry(' ', g_color);
-    g_row = VGA_HEIGHT - 1;
+        screen->buffer[(VGA_TEXT_HEIGHT - 1) * VGA_WIDTH + x] = make_entry(' ', screen->color);
+    screen->row = VGA_TEXT_HEIGHT - 1;
+    refresh_screen();
 }
 
+// Sets column to 0 and increments row. If row reaches 24 (VGA_TEXT_HEIGHT), instead of go through the pagination bar, it calls scroll()
 static void newline(void)
 {
-    g_col = 0;
-    if (++g_row == VGA_HEIGHT)
+    struct vga_screen   *screen = &g_screens[g_active_screen];
+
+    screen->column = 0;
+    if (++screen->row == VGA_TEXT_HEIGHT)
         scroll();
 }
 
 void vga_clear(void)
 {
-    for (size_t i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
-        g_buffer[i] = make_entry(' ', g_color);
-    g_row = 0;
-    g_col = 0;
+    struct vga_screen   *screen = &g_screens[g_active_screen];
+
+    for (size_t i = 0; i < VGA_WIDTH * VGA_TEXT_HEIGHT; i++)
+        screen->buffer[i] = make_entry(' ', screen->color);
+    screen->row = 0;
+    screen->column = 0;
+    refresh_screen();
     update_cursor();
 }
 
+// Initializes the 4 screens structures to zero, enables the hardware cursor, and displays the first screen
 void vga_init(void)
 {
-    g_color = make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    uint8_t default_color = make_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+
+    for (size_t screen = 0; screen < VGA_NUM_SCREENS; screen++)
+    {
+        g_screens[screen].row = 0;
+        g_screens[screen].column = 0;
+        g_screens[screen].color = default_color;
+        for (size_t i = 0; i < VGA_WIDTH * VGA_HEIGHT; i++)
+            g_screens[screen].buffer[i] = make_entry(' ', default_color);
+    }
+    g_active_screen = 0;
     enable_cursor(14, 15);
-    vga_clear();
+    refresh_screen();
+    update_cursor();
 }
 
 void vga_set_color(enum vga_color fg, enum vga_color bg)
 {
-    g_color = make_color(fg, bg);
+    g_screens[g_active_screen].color = make_color(fg, bg);
 }
 
+// Handle some whitespaces and for a standard character: write the 16-bit cell
+// to both screen->buffer[i] and g_buffer_mem[i], then increment screen->column
+// If the 80th column is reached, call newline()
 static void put_raw(char c)
 {
+    struct      vga_screen   *screen = &g_screens[g_active_screen];
+    size_t      i;
+    uint16_t    entry;
+
     switch (c)
     {
         case '\n':
             newline();
             break;
         case '\r':
-            g_col = 0;
+            screen->column = 0;
             break;
         case '\t':
             do
                 put_raw(' ');
-            while (g_col % TAB_SIZE);
+            while (screen->column % TAB_SIZE);
             break;
         case '\b':
-            if (g_col > 0)
-                g_buffer[g_row * VGA_WIDTH + --g_col] = make_entry(' ', g_color);
+            if (screen->column > 0)
+            {
+                i = screen->row * VGA_WIDTH + --screen->column;
+                entry = make_entry(' ', screen->color);
+                screen->buffer[i] = entry;
+                g_buffer_mem[i] = entry;
+            }
             break;
         default:
-            g_buffer[g_row * VGA_WIDTH + g_col] = make_entry(c, g_color);
-            if (++g_col == VGA_WIDTH)
+            i = screen->row * VGA_WIDTH + screen->column;
+            entry = make_entry(c, screen->color);
+            screen->buffer[i] = entry;
+            g_buffer_mem[i] = entry;
+            if (++screen->column == VGA_WIDTH)
                 newline();
     }
 }
@@ -122,4 +211,15 @@ void vga_write(const char *data, size_t len)
 void vga_putstr(const char *s)
 {
     vga_write(s, strlen(s));
+}
+
+// Call refresh_screen (which displays the new buffer updates the active tab at the bottom)
+// and update_cursor() (which repositions the cursor where it was last left on that screen)
+void vga_switch_screen(size_t i)
+{
+    if (i >= VGA_NUM_SCREENS || i == g_active_screen)
+        return ;
+    g_active_screen = i;
+    refresh_screen();
+    update_cursor();
 }

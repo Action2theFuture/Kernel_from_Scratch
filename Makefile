@@ -67,6 +67,7 @@ LDFLAGS     := -T linker.ld -nostdlib -z noexecstack $(ARCH_LDFLAGS)
 ASM_SRCS    := boot/boot.asm
 C_SRCS      := kernel/kmain.c \
                drivers/vga.c \
+			   drivers/keyboard.c \
                lib/string.c
 
 OBJS        := $(ASM_SRCS:%.asm=$(BUILD_DIR)/%.o) $(C_SRCS:%.c=$(BUILD_DIR)/%.o)

@@ -1,5 +1,9 @@
 #include "../include/keyboard.h"
 #include "io.h"
+#include "vga.h"
+
+#define SC_F1               0x3B
+#define SC_F4               0x3E
 
 #define KBD_DATA_PORT       0x60 // byte receive by the keyboard
 #define KBD_STATUS_PORT     0x64 // State
@@ -67,6 +71,11 @@ char keyboard_getchar(void)
     {
         g_caps_lock = !g_caps_lock;
         return 0;
+    }
+    if (key >= SC_F1 && key <= SC_F4 && !released)
+    {
+        vga_switch_screen(key - SC_F1);
+        return (0);
     }
 
     if (released || key >= 128)
