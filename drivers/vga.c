@@ -8,9 +8,9 @@
 #define VGA_CRTC_INDEX      0x3D4
 #define VGA_CRTC_DATA       0x3D5
 #define TAB_SIZE            4
-#define VGA_TEXT_HEIGHT     (VGA_HEIGHT - 1)
+#define VGA_TEXT_HEIGHT     (VGA_HEIGHT - 1) // lines 0 to 23
 
-struct vga_screen
+struct vga_screen // Multiscreen : register the informations of the terminal -> his buffer, his color and the position of his cursor
 {
     uint16_t    buffer[VGA_WIDTH * VGA_HEIGHT];
     size_t      row;
@@ -18,26 +18,32 @@ struct vga_screen
     uint8_t     color;
 };
 
-static volatile uint16_t *const g_buffer_mem = (volatile uint16_t *)VGA_MEMORY;
+// g_buffer_mem is the pointer to the actual video memory (0xB8000)
+// volatile prevents the GCC compiler from removing writes to this address because doesn't know that writing to this adress displays pixels
+static volatile uint16_t *const g_buffer_mem = (volatile uint16_t *)VGA_MEMORY; 
 static struct vga_screen        g_screens[VGA_NUM_SCREENS];
 static size_t                   g_active_screen;
 
+// Combine two 4-bit colors (0 to 15) into a single byte: 4 bits on the right -> text (fg) - 4 bits on the left -> background (bg << 4)
 static inline uint8_t make_color(enum vga_color fg, enum vga_color bg)
 {
     return (uint8_t)(fg | (bg << 4));
 }
 
+// Combine the ASCII character (bits 0-7) and the color byte (bits 8-15) into a 16-bit integer (uint16_t)
 static inline uint16_t make_entry(char c, uint8_t color)
 {
     return (uint16_t)(uint8_t)c | ((uint16_t)color << 8);
 }
 
+// line 24, this is the pagination. Written directly into g_buffer_mem and is never part of the area that scrolls
 static void draw_paging(void)
 {
-    uint8_t paging_color = make_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE);
-    uint8_t active_color = make_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_CYAN);
-    size_t  row_offset = VGA_TEXT_HEIGHT * VGA_WIDTH;
+    uint8_t paging_color = make_color(VGA_COLOR_WHITE, VGA_COLOR_BLUE); // Color of the pagination's line
+    uint8_t active_color = make_color(VGA_COLOR_BLACK, VGA_COLOR_LIGHT_CYAN); // Color of the actual page
+    size_t  row_offset = VGA_TEXT_HEIGHT * VGA_WIDTH; // Index of the beginning of the last line (pagination's line)
 
+    // Fill the 80 spaces of this line with the paging_color, then writes " Pages" at the far left
     for (size_t x = 0; x < VGA_WIDTH; x++)
         g_buffer_mem[row_offset + x] = make_entry(' ', paging_color);
 
@@ -46,8 +52,8 @@ static void draw_paging(void)
         g_buffer_mem[row_offset + i] = make_entry(title[i], paging_color);
 
     /* Print [1] [2] [3] [4] */
-    size_t start_x = VGA_WIDTH - (VGA_NUM_SCREENS * 4) - 1;
-    for (size_t screen = 0; screen < VGA_NUM_SCREENS; screen++)
+    size_t start_x = VGA_WIDTH - (VGA_NUM_SCREENS * 4) - 1; // Calculate start_x to align the 4 tabs to the right
+    for (size_t screen = 0; screen < VGA_NUM_SCREENS; screen++) // Iterate through the 4 screens. If screen == g_active_screen -> use active_color and points the number 
     {
         uint8_t col = (screen == g_active_screen) ? active_color : paging_color;
         size_t pos = row_offset + start_x + screen * 4;
@@ -58,6 +64,7 @@ static void draw_paging(void)
     }
 }
 
+// Call draw_paging() to draw line 24, then copy the first 24 lines. Consequently, line 24 is never overwritten
 static void refresh_screen(void)
 {
     struct vga_screen   *screen = &g_screens[g_active_screen];
