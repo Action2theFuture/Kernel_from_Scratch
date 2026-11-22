@@ -68,7 +68,8 @@ ASM_SRCS    := boot/boot.asm
 C_SRCS      := kernel/kmain.c \
                drivers/vga.c \
 			   drivers/keyboard.c \
-               lib/string.c
+               lib/string.c \
+			   lib/printk.c
 
 OBJS        := $(ASM_SRCS:%.asm=$(BUILD_DIR)/%.o) $(C_SRCS:%.c=$(BUILD_DIR)/%.o)
 DEPS        := $(C_SRCS:%.c=$(BUILD_DIR)/%.d)
