@@ -35,5 +35,6 @@ void    vga_putchar(char c);
 void    vga_write(const char *data, size_t len);
 void    vga_putstr(const char *s);
 void    vga_switch_screen(size_t i);
+size_t  vga_active_screen(void);
 
 #endif

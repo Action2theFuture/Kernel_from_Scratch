@@ -223,3 +223,8 @@ void vga_switch_screen(size_t i)
     refresh_screen();
     update_cursor();
 }
+
+size_t vga_active_screen(void)
+{
+    return g_active_screen;
+}
