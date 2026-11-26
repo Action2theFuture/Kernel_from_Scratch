@@ -14,6 +14,7 @@ SECTIONS
     {
         KEEP(*(.multiboot))     /* must be in the first 8 KiB of the file */
         *(.text .text.*)
+        kernel_text_end = .;
     }
 
     .rodata BLOCK(4K) : ALIGN(4K)
